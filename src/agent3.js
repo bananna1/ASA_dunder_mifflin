@@ -4,11 +4,10 @@
 //     'http://localhost:8080',
 //     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjUyZWUxOTdiZjY4IiwibmFtZSI6ImRhdmlkZSIsImlhdCI6MTY4ODEzMjUzMH0.Ep3bfFpB6ZGgwX6zfVknN8UACXTbVC6D-GHRnDJNTM4'
 // )
-// console.log(client)
-import { client, BeliefCose } from "./beliefcose2.js"
+import { client, BeliefCose } from "./beliefcose1.js"
 // import {execute_depth} from "./depth_search2.js"
-import { execute_astar } from "./astar_search2.js"
-import { explore_map } from "./map_explorer2.js"
+import { execute_astar } from "./astar_search1.js"
+import { explore_map } from "./map_explorer1.js"
 
 
 
@@ -21,21 +20,74 @@ function distance({ x: x1, y: y1 }, { x: x2, y: y2 }) {
     return dx + dy;
 }
 
+var msg = new Map();
+var friendly_agents = new Set()
+client.shout({ type: "hello" })
+
+client.onMsg((id, name, msg, reply) => {
+    console.log("received msg:", id, name, msg);
+    switch (msg.type) {
+        case "hello": {
+            friendly_agents.add(id);
+            client.say(id, { type: "hello_back" });
+            break;
+        }
+        case "hello_back": {
+            friendly_agents.add(id);
+            break;
+        }
+        case "parcel_sensed": {
+            parcels.set(msg.p.id, msg.p);
+            break;
+        }
+        case "intention": {
+            switch (msg.intention_type) {
+                case "go_pick_up": {
+                    let other_utility = msg.utility;
+                    let other_id = msg.id;
+                    // let other_parcel = parcels.get(other_id);
+                    let my_int = ["ciao"];
+                    if(myAgent.intention_queue[0]){
+                        my_int = myAgent.intention_queue[0].predicate;
+                    }
+
+                    if (reply) {
+                        var answer = my_int[0] == "go_pick_up" && my_int[3] == other_id && my_utility > other_utility   //TODO remember to change >= to favor 
+                        console.log("got asked, i answered", answer,", my utility: ",my_utility, "my intention:",my_int[0]);
+                        try { reply(answer) }
+                        catch { (error) => console.log(error) }
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+        case "where_are_you":{
+            if (reply) {
+                var answer = {x:me.x, y:me.y}
+                console.log("got asked, i answered", answer);
+                try { reply(answer) }
+                catch { (error) => console.log(error) }
+                break;
+            }
+        }
+    }
+})
+
 var reachable_tiles;
 var mapp;
 var w;
 var h;
+var already_started = false;
 
 client.onMap((width, height, tiles) => {
     w = width - 1;
     h = height - 1;
     mapp = Array(width).fill(0).map(() => Array(height).fill(0))
-    console.log("facendo...")
     // console.log(tiles)
     reachable_tiles = Array(width).fill().map(() => Array(height).fill())
-    for (var x = 0; x < width; x++) {
+    for (var x = 0; x < width; x++) {1
         for (var y = 0; y < height; y++) {
-            // console.log(x,"-",y)
             reachable_tiles[x][y] = true;
             mapp[x][y] = 0;
             for (var el of tiles) {
@@ -43,7 +95,11 @@ client.onMap((width, height, tiles) => {
             }
         }
     }
-    // console.log(reachable_tiles)
+    if(!already_started){
+        already_started = true;
+        myAgent.loop();
+
+    } 
 })
 
 /**
@@ -56,7 +112,6 @@ var i = 0;
 var time_estimation_movement = 1;
 client.onYou(({ id, name, x, y, score }) => {
     // old_me.x = me.x; old_me.y = me.y;
-    //  console.log("sssssssssssssssssssssss")
     me.id = id
     me.name = name
 
@@ -96,12 +151,16 @@ var total_time = 0;
 var first_sensing = new Map();
 var delta_reward = 0;
 client.onParcelsSensing(async (perceived_parcels) => {
-    // console.log("Decaying:",decaying)
     for (const p of perceived_parcels) {
         if (!parcels.has(p.id) && !p.carriedBy) {
             first_sensing.set(p.id, [Date.now(), p.reward]);
+            parcels.set(p.id, p);
+            for (var ag of friendly_agents) {
+                console.log("saying to ",ag," parcel sensed:",p)
+                client.say(ag, { type: "parcel_sensed", p });
+            }
         }
-        parcels.set(p.id, p);
+
         if (first_sensing.get(p.id)) {
 
             let [first_time, first_reward] = first_sensing.get(p.id);
@@ -110,17 +169,14 @@ client.onParcelsSensing(async (perceived_parcels) => {
                 decaying = true;
                 var elapsed_time = Date.now() - first_time;
                 var estim = elapsed_time / delta_reward;
-                // console.log("estim:",estim, "delta reward:",delta_reward, "time:",elapsed_time);
                 time_estimation_decaying = (time_estimation_decaying * total_time + estim * elapsed_time) / (total_time + elapsed_time);
                 total_time += elapsed_time;
-                // console.log("decaying estimation:",time_estimation_decaying)
             }
         }
 
 
 
     }
-    // console.log("decaying estimation:",time_estimation_decaying);
 })
 
 var bad_agents = new Map();
@@ -165,7 +221,7 @@ client.onTile((x, y, delivery) => {
 
 
 client.onConfig((param) => {
-    // console.log(param);
+    console.log(param);
 })
 client.onParcelsSensing(sensingLoop)
 
@@ -178,20 +234,19 @@ client.onYou(sensingLoop)
 
 
 var proximity_priority;
-//---------------------------------------------------------------------------------------------------------------------------------------------------
+var other_agents_parcels = new Set();
+var my_utility = -1000;
+//----------------------------------------------------------------------------------------------------------------------------------------------------------------
 function sensingLoop() {
-    // console.log("dsjaisjao")
+    // console.log("friendly agents:",friendly_agents)
     // TODO revisit beliefset revision so to trigger option generation only in the case a new parcel is observed
     var tile_per_decaying = time_estimation_decaying / (time_estimation_movement / 0.75);
-    // console.log("tpd:",tile_per_decaying)
     /**
      * Options generation
      */
-    // console.log(parcels)
     const options = []
     for (const parcel of parcels.values()) {
-        // console.log(parcel)
-        if (!parcel.carriedBy) {
+        if (!parcel.carriedBy && !other_agents_parcels.has(parcel.id)) {
             var occupied = false;
             for (let [k, v] of bad_agents) {
                 if (v[0] == Math.round(parcel.x) && v[1] == Math.round(parcel.y)) {
@@ -204,15 +259,22 @@ function sensingLoop() {
         // myAgent.push( [ 'go_pick_up', parcel.x, parcel.y, parcel.id ] )
     }
 
-    // console.log(options)
-    console.log("carried_parcels:", carried_parcels.size)
+    // console.log("carried_parcels:", carried_parcels.size)
     if (carried_parcels.size != 0) options.push(["go_put_down"])
 
     if (options.length == 0) {
+        // console.log(myAgent.intention_queue)
         if (myAgent.intention_queue.length == 0 || (myAgent.intention_queue[0].predicate[0] != "go_to_random")) {
-            let [xx, yy] = explore_map(me.x, me.y)
-            myAgent.push(["go_to_random", xx, yy]);
+            myAgent.push(["go_to_random"]);
             return;
+            // var fa;
+            // for (var ag of friendly_agents){
+            //     client.ask(ag,{type:"where_are_you"})
+            //     .then(answer=>{
+            //         let [xx, yy] = explore_map(me.x, me.y, answer[0], answer[1]);
+            //     })
+            // }
+            // return;
         }
     }
     /**
@@ -230,7 +292,6 @@ function sensingLoop() {
             let [go_pick_up, x, y, id, is_best] = option;
             x = Math.round(x);
             y = Math.round(y);
-            // console.log("X:",x,"Y:",y);
 
             var occupied = false;
             for (var [key, ag] of bad_agents) {
@@ -273,20 +334,20 @@ function sensingLoop() {
                 if (parcels.get(id).reward * tile_per_decaying >= 15) proximity_priority = 100 * Math.pow(Math.E, -0.5 * (current_d - 1))
                 else proximity_priority = 0;
                 current_total_gain += proximity_priority;
-                // console.log("ctg:",current_total_gain, "btg:",best_total_gain)
                 // var current_total_gain = gain + current_reward - carried_parcels.size*(current_d+extra_d)/tile_per_decaying;
                 if (current_total_gain > best_total_gain && reachable_tiles[x][y] == true) {
                     // console.log("FOUND BEST")
                     best_total_gain = current_total_gain
+                    my_utility = current_total_gain;
                     best_option = option;
                 }
             }
             else {
                 // while(!reachable_tiles)
-                // console.log("rt:",reachable_tiles)
-                console.log(x, y)
+                // console.log(x, y)
                 if (current_d < nearest && reachable_tiles[x][y] == true) {
                     nearest = current_d;
+                    my_utility = current_d;
                     best_option = option;
                 }
             }
@@ -295,7 +356,6 @@ function sensingLoop() {
         else if (option[0] == "go_put_down") {
             var hole = closest_hole(me);
             // let current_d = distance(me,{x:hole[0],y:hole[1]});
-            // console.log(typeof mapp)
             // let current_d = execute_depth(me.x,me.y,hole[0], hole[1],mapp);
             let current_d = execute_astar(me.x, me.y, hole[0], hole[1])
             // console.log("current d3:",me.x,me.y," => ",hole[0],hole[1],":",current_d)
@@ -314,10 +374,14 @@ function sensingLoop() {
                 // console.log("ctg:",current_total_gain, "btg:",best_total_gain)
                 if (current_total_gain > best_total_gain && reachable_tiles[hole[0]][hole[1]] == true) {
                     best_option = option;
+                    my_utility = current_total_gain;
                 }
             }
             else {
-                if (current_d < nearest - 3) best_option = option;
+                if (current_d < nearest - 3) {
+                    my_utility = current_d;
+                    best_option = option;
+                }
             }
         }
     }
@@ -326,17 +390,9 @@ function sensingLoop() {
      * Best option is selected
      */
     if (best_option) {
-        // console.log("BEst option",best_option)
-        console.log(best_option)
-        // console.log("best_option after:",best_option.splice(0,best_option.length-1))
-        // myAgent.push(best_option.splice(0,best_option.length-1))
-        myAgent.shift(best_option);
-        // myAgent.shift(best_option)
-        // for (var p of parcels){
-        //     console.log("porca troia",p.x,p.y)
-        //     if(distance(me,{x:p.x, y:p.y} && p.id != best_option[3])<=1) myAgent.shift(["go_pick_up", Math.round(p.x), Math.round(p.y), p.id, false])
-        // }
-
+        // console.log(best_option)
+        myAgent.shift(best_option)
+        // console.log("queueueue:",myAgent.intention_queue)
     }
 }
 
@@ -433,82 +489,6 @@ class IntentionRevisionQueue extends IntentionRevision {
 
 }
 
-// class IntentionRevisionReplace extends IntentionRevision {
-
-//     async push(predicate) {
-
-//         // Check if already queued
-//         const last = this.intention_queue.at(this.intention_queue.length - 1);
-//         if (last && last.predicate.join(' ') == predicate.join(' ')) {
-//             return; // intention is already being achieved
-//         }
-
-//         console.log('IntentionRevisionReplace.push', predicate);
-//         const intention = new Intention(this, predicate);
-//         this.intention_queue.push(intention);
-
-//         // Force current intention stop 
-//         if (last) {
-//             last.stop();
-//         }
-//     }
-
-// }
-
-// class IntentionRevisionRevise extends IntentionRevision {
-
-//     async push(predicate) {
-//         // console.log( 'Revising intention queue. Received', ...predicate );
-//         if ( this.intention_queue.find( (i) => i.predicate.join(' ') == predicate.join(' ') ) ){
-//             // console.log("Already found in queue")
-//             return;
-//         } 
-//         console.log("here")
-//         const intention = new Intention(this,predicate);
-//         this.intention_queue.push(intention);
-
-//         this.intention_queue.forEach(el=>{
-//             // console.log("a:",el.predicate)
-//         })
-
-//         var current_d = 0;
-//         var current_value=0;
-//         var current_utility=0;
-//         var best_utility=0;
-//         var best_index = 0;
-//         // console.log("iq prima prima:",this.intention_queue)
-
-//         for( var i=0; i<this.intention_queue.length; i++){
-//             // console.log("ANALYZING:",this.intention_queue[i].predicate)
-//             if(this.intention_queue[i].predicate[0] == "go_pick_up"){
-//                 // console.log("Found go_pick_up")
-//                 current_d = distance(me, {x:this.intention_queue[i].predicate[1], y:this.intention_queue[i].predicate[2]});
-//                 current_value = parcels.get(this.intention_queue[i].predicate[3]);
-//                 current_utility= current_value.reward - current_d;
-//                 if(current_utility > best_utility){
-//                     best_utility = current_utility;
-//                     best_index = i;
-//                 }
-//             }
-//         }
-//         if (best_index != 0){
-//             // console.log("splicing at",best_index)
-//             this.intention_queue[0].stop();
-//             // await client.timer(1000)
-//             var new_best = this.intention_queue.splice(best_index,1);
-//             // console.log("new best:",new_best[0].predicate)
-//             this.intention_queue.unshift(new_best[0])
-//             // console.log("iq dopo:", this.intention_queue)
-
-//         }
-//         // TODO
-//         // - order intentions based on utility function (reward - cost) (for example, parcel score minus distance)
-//         // - eventually stop current one
-//         // - evaluate validity of intention
-//     }
-
-// }
-
 /**
  * Start intention revision loop
  */
@@ -516,8 +496,9 @@ class IntentionRevisionQueue extends IntentionRevision {
 const myAgent = new IntentionRevisionQueue();
 // const myAgent = new IntentionRevisionReplace();
 // const myAgent = new IntentionRevisionRevise();
-client.timer(1000)
-myAgent.loop();
+// client.timer(1000)
+// while(!reachable_tiles);
+// myAgent.loop();
 
 
 
@@ -578,6 +559,10 @@ class Intention {
             this.#started = true;
 
         // Trying all plans in the library
+        // for (var ag of friendly_agents){
+        //     let reply = await client.ask(ag, {type:"intention",msg: {intention_type:this.predicate[0], intention:this}})
+
+        // }
         for (const planClass of planLibrary) {
 
             // if stopped then quit
@@ -666,6 +651,16 @@ class GoPickUp extends Plan {
 
     async execute(go_pick_up, x, y, id,) {
         if (this.stopped) throw ['stopped']; // if stopped then quit
+
+        for (let ag of friendly_agents) {
+            console.log("asking ",ag,go_pick_up,x,y,id,my_utility);
+            let other_is_better = await client.ask(ag, { type: "intention", intention_type: "go_pick_up", id, utility: my_utility });
+            console.log("answer:",other_is_better)
+            if (other_is_better) {
+                other_agents_parcels.add(id);
+                throw ['stopped'];
+            }
+        }
         // if(!is_best){
         //     var cur_d = distance(me,{x,y});
         //     if(cur_d >= 1.5) return false;
@@ -688,9 +683,17 @@ class BlindMove extends Plan {
         return go_to == 'go_to_random';
     }
 
-    async execute(go_to, x, y) {
+    async execute(go_to) {
         if (this.stopped) throw ("stopped")
-        await this.subIntention("go_to", x, y);
+        let fa = Array.from(friendly_agents);
+        console.log(fa.length)
+        console.log("hi");
+        var friend = [-1,-1];
+        if(fa.length != 0) friend = await client.ask(fa[0],{type:"where_are_you"})
+        if (this.stopped) throw ("stopped")
+        let [xx,yy] = explore_map(me.x,me.y, friend[0], friend[1])
+        console.log("xxyy",xx,yy);
+        await this.subIntention(["go_to", xx, yy]);
 
     }
 }
@@ -698,14 +701,11 @@ class BlindMove extends Plan {
 
 class GoPutDown extends Plan {
     static isApplicableTo(action, a, b, c) {
-        // console.log("predicate:", action)
         return action == "go_put_down";   //TODO forse
     }
 
     async execute(go_put_down, x, y) {
-        console.log("putting down")
         var hole = closest_hole(me);
-        console.log("Closest hole:", hole)
         var res = await this.subIntention(["go_to", hole[0], hole[1]]);
         // if(res == 1) return 1;
         if (this.stopped) throw ['stopped']
@@ -730,15 +730,16 @@ class PlanMove extends Plan {
     async execute(go_to, x, y) {
         var x_from = me.x;
         var y_from = me.y;
+        console.log(x,y)
         // console.log("Sono qua")
         if (me.x == x && me.y == y) return 0;
         var changed = true;
         do {
             if (changed) var array_directions = await belief.generate_plan(x_from, y_from, x, y);
             changed = false;
-            // console.log("arary directions:",array_directions)
+            console.log("arary directions:",array_directions)
             if (array_directions == -1) { //??????????????????????????????? TODO
-                console.log("PLAN IS UNDEFINED")
+                // console.log("PLAN IS UNDEFINED")
                 var because_of_agent = false;
                 for (var [k, v] of bad_agents) {
                     if (v[0] == x && v[1] == y) because_of_agent = true;
@@ -755,9 +756,8 @@ class PlanMove extends Plan {
                 if (this.stopped) throw ['stopped'];
                 // console.log("updating belief set 2 with",x,y);
                 var changes = update_beliefset(x, y);
-                // console.log("iiiiiiiiiiiiiiiii")
                 if (await client.move(dir)) {
-                    console.log("moved", dir)
+                    // console.log("moved", dir)
                 }
                 else {
                     // console.log("updating belief set 3 with",x,y);
@@ -766,7 +766,7 @@ class PlanMove extends Plan {
                 }
                 if (changes) {
                     changed = changes;
-                    console.log("beliefset updated")
+                    // console.log("beliefset updated")
                     break;
                 }
 
@@ -862,7 +862,7 @@ function is_still_valid(intention) {
 
 
 function update_beliefset(x, y) {
-    console.log("xy:", x, y)
+    // console.log("xy:", x, y)
     for (let [k, v] in bad_agents_in_beliefset) {
         if (!bad_agents.has(k)/*  && distance(me,{x:v[0], y:v[1]})>=8 */) {
             bad_agents_in_beliefset.delete(k);
@@ -877,7 +877,7 @@ function update_beliefset(x, y) {
             // console.log("NOT in there")
             belief.updateBeliefSet(value[0], value[1], false);
             bad_agents_in_beliefset.set(key, [value[0], value[1]])
-            console.log(bad_agents_in_beliefset.get(key))
+            // console.log(bad_agents_in_beliefset.get(key))
             // console.log("Found changes 1")
             problems = true;
         }
@@ -902,9 +902,9 @@ function update_beliefset(x, y) {
         }
     }
     if (!problems) {
-        console.log("no problems")
+        // console.log("no problems")
     }
-    console.log(bad_agents_in_beliefset)
+    // console.log(bad_agents_in_beliefset)
     return problems;
 }
 

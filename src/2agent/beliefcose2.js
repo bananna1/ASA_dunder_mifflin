@@ -117,7 +117,7 @@ export class BeliefCose {
         // console.log("domain;",this.#domain);
         // console.log("problem:",problem)
         var plan = await onlineSolver(this.#domain, problem); 
-        console.log("piano:",plan)
+        // console.log("piano:",plan)
         if(plan == -1) return -1;
         var plan_array = [];
         for (var element of plan) {
