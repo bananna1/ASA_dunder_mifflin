@@ -7,7 +7,7 @@
 import { client, PddlClass } from "./pddl_class3.js"
 // import {execute_depth} from "./depth_search2.js"
 import { execute_astar } from "./astar_search3.js"
-import { explore_map } from "./map_explorer1.js"
+import { explore_map } from "./map_explorer3.js"
 
 
 
