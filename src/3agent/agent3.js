@@ -4,9 +4,9 @@
 //     'http://localhost:8080',
 //     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjUyZWUxOTdiZjY4IiwibmFtZSI6ImRhdmlkZSIsImlhdCI6MTY4ODEzMjUzMH0.Ep3bfFpB6ZGgwX6zfVknN8UACXTbVC6D-GHRnDJNTM4'
 // )
-import { client, PddlClass } from "./pddl_class.js"
+import { client, PddlClass } from "./pddl_class3.js"
 // import {execute_depth} from "./depth_search2.js"
-import { execute_astar } from "./astar_search1.js"
+import { execute_astar } from "./astar_search3.js"
 import { explore_map } from "./map_explorer1.js"
 
 

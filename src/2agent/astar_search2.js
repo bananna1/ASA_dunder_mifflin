@@ -1,6 +1,6 @@
 // import { DeliverooApi,timer } from "@unitn-asa/deliveroo-js-client";
 // import { onlineSolver, PddlExecutor, PddlProblem, Beliefset } from "@unitn-asa/pddl-client";
-import {client} from "./beliefcose2.js"
+import {client} from "./pddl_class2.js"
 // import fs from 'fs';
 
 
