@@ -1,14 +1,16 @@
 import { onlineSolver, PddlExecutor, PddlProblem, Beliefset, PddlDomain, PddlAction } from "@unitn-asa/pddl-client";
 import { DeliverooApi } from "@unitn-asa/deliveroo-js-client";
+// import { client } from "./depth_search.js";
 
 export const client = new DeliverooApi(
     'http://localhost:8080',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjUyZWUxOTdiZjY4IiwibmFtZSI6ImRhdmlkZSIsImlhdCI6MTY4ODEzMjUzMH0.Ep3bfFpB6ZGgwX6zfVknN8UACXTbVC6D-GHRnDJNTM4'
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6Ijk2NDMxNjhhYjZiIiwibmFtZSI6ImRhdmlkZTIiLCJpYXQiOjE2ODg2NTU2MDR9.2FYmyNlDeNx-QakS2P4oL_aFPSe7fGhO7ElB9NPSfEc'
 )
 
 export class BeliefCose {
     #myBeliefSet = new Beliefset();
     #domain;
+    #old_at;
     constructor() {
         // build domain
         const right = new PddlAction(
@@ -44,7 +46,7 @@ export class BeliefCose {
 
         // populate belief set
         client.onMap((width, height, tiles) => {
-            console.log(tiles);
+            // console.log(tiles);
             for (var i = 0; i < width; i++) {
                 for (var j = 0; j < height; j++) {
                     var inTiles = false;
@@ -79,24 +81,30 @@ export class BeliefCose {
             }
         });
 
-        
+        this.#old_at = 'at v0 v0'; // defalt value, will get substituted when generate_plan will be called for the first time
+        this.#myBeliefSet.declare(this.#old_at);
+        // console.log("aaaaaaaaaa",this.#myBeliefSet.entries);
     }
 
     updateBeliefSet(x, y, valid) {
         // INSERIRE CONTROLLI SU x E y???
         var new_belief = 'valid v' + x + ' v' + y; 
         if (valid) {
-            this.#myBeliefSet.declare(belief);
+            this.#myBeliefSet.declare(new_belief);
         }
         else {
-            this.#myBeliefSet.undeclare(belief);
+            this.#myBeliefSet.undeclare(new_belief);
         }
     }
 
     async generate_plan(x_from, y_from, x_to, y_to) {
         // INSERIRE CONTROLLI SU x E y???
         var curr_pos = 'at v' + x_from + " v" + y_from;
+        // console.log("removing:",this.#old_at, typeof(this.#old_at))
+        //this.#myBeliefSet.removeObject(this.#old_at);
+        this.#myBeliefSet.removeFacts(this.#old_at);
         this.#myBeliefSet.declare(curr_pos);
+        this.#old_at = curr_pos;
         var goal = "at v" + x_to + " v" + y_to;
         var pddlProblem = new PddlProblem(
             'dunder-mifflin',
@@ -109,11 +117,13 @@ export class BeliefCose {
         // console.log("domain;",this.#domain);
         // console.log("problem:",problem)
         var plan = await onlineSolver(this.#domain, problem); 
+        console.log("piano:",plan)
+        if(plan == -1) return -1;
         var plan_array = [];
         for (var element of plan) {
             plan_array.push(element.action);
         }
-        console.log("pianino:",plan_array)
+        // console.log("pianino:",plan_array)
         return plan_array;
     }
 
