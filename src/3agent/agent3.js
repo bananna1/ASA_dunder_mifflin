@@ -4,7 +4,7 @@
 //     'http://localhost:8080',
 //     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjUyZWUxOTdiZjY4IiwibmFtZSI6ImRhdmlkZSIsImlhdCI6MTY4ODEzMjUzMH0.Ep3bfFpB6ZGgwX6zfVknN8UACXTbVC6D-GHRnDJNTM4'
 // )
-import { client, BeliefCose } from "./beliefcose1.js"
+import { client, PddlClass } from "./pddl_class.js"
 // import {execute_depth} from "./depth_search2.js"
 import { execute_astar } from "./astar_search1.js"
 import { explore_map } from "./map_explorer1.js"
@@ -12,7 +12,7 @@ import { explore_map } from "./map_explorer1.js"
 
 
 // await client.move("right")
-var belief = new BeliefCose()
+var belief = new PddlClass()
 
 function distance({ x: x1, y: y1 }, { x: x2, y: y2 }) {
     const dx = Math.abs(Math.round(x1) - Math.round(x2))
@@ -150,21 +150,15 @@ var time_estimation_decaying = 0;
 var total_time = 0;
 var first_sensing = new Map();
 var delta_reward = 0;
-var taken_parcels = new Set();
 client.onParcelsSensing(async (perceived_parcels) => {
     for (const p of perceived_parcels) {
-        if(p.carriedBy) taken_parcels.add(p.id);
-        else if (!parcels.has(p.id) && !p.carriedBy) {
+        if (!parcels.has(p.id) && !p.carriedBy) {
             first_sensing.set(p.id, [Date.now(), p.reward]);
             parcels.set(p.id, p);
             for (var ag of friendly_agents) {
                 console.log("saying to ",ag," parcel sensed:",p)
                 client.say(ag, { type: "parcel_sensed", p });
             }
-        }
-
-        for(var el of taken_parcels){
-            if(parcels.has(el)) parcels.delete(el);
         }
 
         if (first_sensing.get(p.id)) {
@@ -198,7 +192,7 @@ client.onAgentsSensing(agents => {
         // myAgent.intention_queue[0].stop();
         let int = myAgent.intention_queue[0].predicate[0];
         // console.log("int:",int)
-        if (int == "go_pick_up" || int == "go_to" || int == "go_to_random") {
+        if (int == "go_pick_up" || int == "go_to" || int == "go_to_explore") {
             // console.log(myAgent.intention_queue[0].predicate)
             let x = myAgent.intention_queue[0].predicate[1];
             let y = myAgent.intention_queue[0].predicate[2];
@@ -242,14 +236,10 @@ client.onYou(sensingLoop)
 var proximity_priority;
 var other_agents_parcels = new Set();
 var my_utility = -1000;
-var i=0;
-var last_option_length;
 //----------------------------------------------------------------------------------------------------------------------------------------------------------------
 function sensingLoop() {
     // console.log("friendly agents:",friendly_agents)
     // TODO revisit beliefset revision so to trigger option generation only in the case a new parcel is observed
-    check_unreachable();
-    i++;
     var tile_per_decaying = time_estimation_decaying / (time_estimation_movement / 0.75);
     /**
      * Options generation
@@ -268,13 +258,14 @@ function sensingLoop() {
         }
         // myAgent.push( [ 'go_pick_up', parcel.x, parcel.y, parcel.id ] )
     }
+
+    // console.log("carried_parcels:", carried_parcels.size)
     if (carried_parcels.size != 0) options.push(["go_put_down"])
 
-
-    if(options.length ==0){
-        if (myAgent.intention_queue.length == 0 || (myAgent.intention_queue[0].predicate[0] != "go_to_random")) {
-            myAgent.push(["go_to_random"]);
-
+    if (options.length == 0) {
+        // console.log(myAgent.intention_queue)
+        if (myAgent.intention_queue.length == 0 || (myAgent.intention_queue[0].predicate[0] != "go_to_explore")) {
+            myAgent.push(["go_to_explore"]);
             return;
             // var fa;
             // for (var ag of friendly_agents){
@@ -285,14 +276,6 @@ function sensingLoop() {
             // }
             // return;
         }
-
-    }
-
-    // console.log("carried_parcels:", carried_parcels.size)
-    
-    console.log("In the loop",i);
-    if (options.length == 0) {
-        // console.log(myAgent.intention_queue)
     }
     /**
      * Options filtering
@@ -329,7 +312,7 @@ function sensingLoop() {
             // let current_plan = await belief.generate_plan(me.x,me.y, x,y);
             // var current_plan = belief.generate_plan(me.x,me.y, x,y)
             // let current_d = current_plan.length;
-            // if (decaying == true) {
+            if (decaying == true) {
                 let current_reward = parcels.get(id).reward;
                 var hole = closest_hole({ x, y });
                 // var extra_d = distance({x,y}, {x:hole[0],y:hole[1]})
@@ -346,30 +329,28 @@ function sensingLoop() {
                     else parcels.delete(id)
                 })
                 // console.log(gain,current_reward,)
-                var current_total_gain;
-                if(decaying)current_total_gain = (gain + current_reward) - (carried_parcels.size + 1) * (current_d + extra_d) / tile_per_decaying;
-                else current_total_gain = (gain + current_reward) - (current_d + extra_d)/current_reward;
-                
+
+                var current_total_gain = (gain + current_reward) - (carried_parcels.size + 1) * (current_d + extra_d) / tile_per_decaying;
                 if (parcels.get(id).reward * tile_per_decaying >= 15) proximity_priority = 100 * Math.pow(Math.E, -0.5 * (current_d - 1))
                 else proximity_priority = 0;
                 current_total_gain += proximity_priority;
-
+                // var current_total_gain = gain + current_reward - carried_parcels.size*(current_d+extra_d)/tile_per_decaying;
                 if (current_total_gain > best_total_gain && reachable_tiles[x][y] == true) {
                     // console.log("FOUND BEST")
                     best_total_gain = current_total_gain
                     my_utility = current_total_gain;
                     best_option = option;
                 }
-            // }
-            // else {
-            //     // while(!reachable_tiles)
-            //     // console.log(x, y)
-            //     if (current_d < nearest && reachable_tiles[x][y] == true) {
-            //         nearest = current_d;
-            //         my_utility = current_d;
-            //         best_option = option;
-            //     }
-            // }
+            }
+            else {
+                // while(!reachable_tiles)
+                // console.log(x, y)
+                if (current_d < nearest && reachable_tiles[x][y] == true) {
+                    nearest = current_d;
+                    my_utility = current_d;
+                    best_option = option;
+                }
+            }
 
         }
         else if (option[0] == "go_put_down") {
@@ -378,7 +359,7 @@ function sensingLoop() {
             // let current_d = execute_depth(me.x,me.y,hole[0], hole[1],mapp);
             let current_d = execute_astar(me.x, me.y, hole[0], hole[1])
             // console.log("current d3:",me.x,me.y," => ",hole[0],hole[1],":",current_d)
-            // if (decaying == true) {
+            if (decaying == true) {
                 var gain = 0;
                 carried_parcels.forEach(id => {
                     if (parcels.get(id)) {
@@ -386,23 +367,22 @@ function sensingLoop() {
                     }
                     else parcels.delete(id)
                 })
-                var current_total_gain;
-                if(decaying) current_total_gain = (gain - carried_parcels.size * current_d / tile_per_decaying);
-                else current_total_gain = gain - current_d
+                var current_total_gain = (gain - carried_parcels.size * current_d / tile_per_decaying);
                 proximity_priority = 100 * Math.pow(Math.E, -0.5 * (current_d - 1))
                 current_total_gain += proximity_priority;
+
                 // console.log("ctg:",current_total_gain, "btg:",best_total_gain)
                 if (current_total_gain > best_total_gain && reachable_tiles[hole[0]][hole[1]] == true) {
                     best_option = option;
                     my_utility = current_total_gain;
                 }
-            // }
-            // else {
-            //     if (current_d < nearest - 3) {
-            //         my_utility = current_d;
-            //         best_option = option;
-            //     }
-            // }
+            }
+            else {
+                if (current_d < nearest - 3) {
+                    my_utility = current_d;
+                    best_option = option;
+                }
+            }
         }
     }
 
@@ -469,7 +449,6 @@ class IntentionRevision {
 
                 // Remove from the queue
                 this.intention_queue.shift();
-                console.log("iq:",this.intention_queue)
             }
             // Postpone next iteration at setImmediate
             await new Promise(res => setImmediate(res));
@@ -679,7 +658,6 @@ class GoPickUp extends Plan {
             console.log("answer:",other_is_better)
             if (other_is_better) {
                 other_agents_parcels.add(id);
-                taken_parcels.add(id);
                 throw ['stopped'];
             }
         }
@@ -699,10 +677,10 @@ class GoPickUp extends Plan {
 
 }
 
-class BlindMove extends Plan {
+class ExploreMove extends Plan {
 
     static isApplicableTo(go_to, x, y) {
-        return go_to == 'go_to_random';
+        return go_to == 'go_to_explore';
     }
 
     async execute(go_to) {
@@ -746,7 +724,7 @@ class PlanMove extends Plan {
 
     static isApplicableTo(action, a, b, c) {
         // console.log("predicate:",action)
-        return action == 'go_to' || action == "go_to_random";
+        return action == 'go_to' || action == "go_to_explore";
     }
 
     async execute(go_to, x, y) {
@@ -804,7 +782,7 @@ class PlanMove extends Plan {
 
 
 // plan classes are added to plan library 
-planLibrary.push(BlindMove)
+planLibrary.push(ExploreMove)
 planLibrary.push(PlanMove)
 planLibrary.push(GoPickUp)
 planLibrary.push(GoPutDown)
@@ -861,7 +839,7 @@ function is_still_valid(intention) {
         case "go_put_down": {
             return (carried_parcels != 0)
         }
-        case "go_to_random": {
+        case "go_to_explore": {
             return true;
         }
         case "go_to": {
@@ -894,8 +872,8 @@ function update_beliefset(x, y) {
     var problems = false;
     // console.log("updating beliefset")
     for (let [key, value] of bad_agents) {
-        // console.log(key,value, is_in_mezzo(value[0],value[1],x,y), bad_agents_in_beliefset.has(key), distance(me,{x:value[0],y:value[1]}))
-        if (!bad_agents_in_beliefset.has(key) && distance(me, { x: value[0], y: value[1] }) <= 3 && is_in_mezzo(value[0], value[1], x, y)) {
+        // console.log(key,value, is_potential_obstacle(value[0],value[1],x,y), bad_agents_in_beliefset.has(key), distance(me,{x:value[0],y:value[1]}))
+        if (!bad_agents_in_beliefset.has(key) && distance(me, { x: value[0], y: value[1] }) <= 5 && is_potential_obstacle(value[0], value[1], x, y)) {
             // console.log("NOT in there")
             belief.updateBeliefSet(value[0], value[1], false);
             bad_agents_in_beliefset.set(key, [value[0], value[1]])
@@ -911,7 +889,7 @@ function update_beliefset(x, y) {
                 // console.log("He moved")
                 belief.updateBeliefSet(ag[0], ag[1], true);
                 bad_agents_in_beliefset.delete(key)
-                if (distance(me, { x: value[0], y: value[1] }) <= 3 && is_in_mezzo(value[0], value[1], x, y)) {
+                if (distance(me, { x: value[0], y: value[1] }) <= 3 && is_potential_obstacle(value[0], value[1], x, y)) {
                     belief.updateBeliefSet(value[0], value[1], false);
                     bad_agents_in_beliefset.set(key, [value[0], value[1]])
                     // console.log("Found changes 2")
@@ -930,7 +908,7 @@ function update_beliefset(x, y) {
     return problems;
 }
 
-function is_in_mezzo(ax, ay, x, y) {
+function is_potential_obstacle(ax, ay, x, y) {
     // console.log("ax:",ax,"ay:",ay,'x:',x,'y:',y, "me.x:",me.x,"me.y:",me.y)
     if (me.x >= x && me.y >= y) return ((x - 1 <= ax && ax <= me.x + 1) && (y - 1 <= ay && ay <= me.y + 1))
     if (me.x >= x && me.y <= y) return ((x - 1 <= ax && ax <= me.x + 1) && (me.y - 1 <= ay && ay <= y + 1))
@@ -938,12 +916,4 @@ function is_in_mezzo(ax, ay, x, y) {
     if (me.x <= x && me.y <= y) return ((me.x - 1 <= ax && ax <= x + 1) && (me.y - 1 <= ay && ay <= y + 1))
 }
 
-
-function check_unreachable(){
-    for (var v of parcels.values()){
-        let is_reachable = execute_astar(me.x,me.y,v.x,v.y)
-        if(is_reachable == 10000) parcels.delete(v.id)
-    }
-}
-
-setInterval(sensingLoop, 200);
+setInterval(sensingLoop, 500);

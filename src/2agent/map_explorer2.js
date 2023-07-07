@@ -1,6 +1,6 @@
 // import { DeliverooApi,timer } from "@unitn-asa/deliveroo-js-client";
 // import { onlineSolver, PddlExecutor, PddlProblem, Beliefset } from "@unitn-asa/pddl-client";
-import { client, BeliefCose } from "./beliefcose2.js";
+import { client, PddlClass } from "./beliefcose2.js";
 
 
 var saved_tiles = new Array();

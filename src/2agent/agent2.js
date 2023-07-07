@@ -4,7 +4,7 @@
 //     'http://localhost:8080',
 //     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjUyZWUxOTdiZjY4IiwibmFtZSI6ImRhdmlkZSIsImlhdCI6MTY4ODEzMjUzMH0.Ep3bfFpB6ZGgwX6zfVknN8UACXTbVC6D-GHRnDJNTM4'
 // )
-import { client, BeliefCose } from "./beliefcose2.js"
+import { client, PddlClass } from "./pddl_class2.js"
 // import {execute_depth} from "./depth_search2.js"
 import { execute_astar } from "./astar_search2.js"
 import { explore_map } from "./map_explorer2.js"
@@ -12,7 +12,7 @@ import { explore_map } from "./map_explorer2.js"
 
 
 // await client.move("right")
-var belief = new BeliefCose()
+var belief = new PddlClass()
 
 function distance({ x: x1, y: y1 }, { x: x2, y: y2 }) {
     const dx = Math.abs(Math.round(x1) - Math.round(x2))
@@ -52,7 +52,7 @@ client.onMsg((id, name, msg, reply) => {
                     }
 
                     if (reply) {
-                        var answer = my_int[0] == "go_pick_up" && my_int[3] == other_id && my_utility > other_utility   //TODO remember to change >= to favor 
+                        var answer = my_int[0] == "go_pick_up" && my_int[3] == other_id && my_utility > other_utility 
                         console.log("got asked, i answered", answer,", my utility: ",my_utility, "my intention:",my_int[0]);
                         try { reply(answer) }
                         catch { (error) => console.log(error) }
@@ -198,7 +198,7 @@ client.onAgentsSensing(agents => {
         // myAgent.intention_queue[0].stop();
         let int = myAgent.intention_queue[0].predicate[0];
         // console.log("int:",int)
-        if (int == "go_pick_up" || int == "go_to" || int == "go_to_random") {
+        if (int == "go_pick_up" || int == "go_to" || int == "go_to_explore") {
             // console.log(myAgent.intention_queue[0].predicate)
             let x = myAgent.intention_queue[0].predicate[1];
             let y = myAgent.intention_queue[0].predicate[2];
@@ -272,8 +272,8 @@ function sensingLoop() {
 
 
     if(options.length ==0){
-        if (myAgent.intention_queue.length == 0 || (myAgent.intention_queue[0].predicate[0] != "go_to_random")) {
-            myAgent.push(["go_to_random"]);
+        if (myAgent.intention_queue.length == 0 || (myAgent.intention_queue[0].predicate[0] != "go_to_explore")) {
+            myAgent.push(["go_to_explore"]);
 
             return;
             // var fa;
@@ -699,10 +699,10 @@ class GoPickUp extends Plan {
 
 }
 
-class BlindMove extends Plan {
+class ExploreMove extends Plan {
 
     static isApplicableTo(go_to, x, y) {
-        return go_to == 'go_to_random';
+        return go_to == 'go_to_explore';
     }
 
     async execute(go_to) {
@@ -746,7 +746,7 @@ class PlanMove extends Plan {
 
     static isApplicableTo(action, a, b, c) {
         // console.log("predicate:",action)
-        return action == 'go_to' || action == "go_to_random";
+        return action == 'go_to' || action == "go_to_explore";
     }
 
     async execute(go_to, x, y) {
@@ -804,7 +804,7 @@ class PlanMove extends Plan {
 
 
 // plan classes are added to plan library 
-planLibrary.push(BlindMove)
+planLibrary.push(ExploreMove)
 planLibrary.push(PlanMove)
 planLibrary.push(GoPickUp)
 planLibrary.push(GoPutDown)
@@ -861,7 +861,7 @@ function is_still_valid(intention) {
         case "go_put_down": {
             return (carried_parcels != 0)
         }
-        case "go_to_random": {
+        case "go_to_explore": {
             return true;
         }
         case "go_to": {
@@ -894,8 +894,8 @@ function update_beliefset(x, y) {
     var problems = false;
     // console.log("updating beliefset")
     for (let [key, value] of bad_agents) {
-        // console.log(key,value, is_in_mezzo(value[0],value[1],x,y), bad_agents_in_beliefset.has(key), distance(me,{x:value[0],y:value[1]}))
-        if (!bad_agents_in_beliefset.has(key) && distance(me, { x: value[0], y: value[1] }) <= 3 && is_in_mezzo(value[0], value[1], x, y)) {
+        // console.log(key,value, is_potential_obstacle(value[0],value[1],x,y), bad_agents_in_beliefset.has(key), distance(me,{x:value[0],y:value[1]}))
+        if (!bad_agents_in_beliefset.has(key) && distance(me, { x: value[0], y: value[1] }) <= 3 && is_potential_obstacle(value[0], value[1], x, y)) {
             // console.log("NOT in there")
             belief.updateBeliefSet(value[0], value[1], false);
             bad_agents_in_beliefset.set(key, [value[0], value[1]])
@@ -911,7 +911,7 @@ function update_beliefset(x, y) {
                 // console.log("He moved")
                 belief.updateBeliefSet(ag[0], ag[1], true);
                 bad_agents_in_beliefset.delete(key)
-                if (distance(me, { x: value[0], y: value[1] }) <= 3 && is_in_mezzo(value[0], value[1], x, y)) {
+                if (distance(me, { x: value[0], y: value[1] }) <= 3 && is_potential_obstacle(value[0], value[1], x, y)) {
                     belief.updateBeliefSet(value[0], value[1], false);
                     bad_agents_in_beliefset.set(key, [value[0], value[1]])
                     // console.log("Found changes 2")
@@ -930,7 +930,7 @@ function update_beliefset(x, y) {
     return problems;
 }
 
-function is_in_mezzo(ax, ay, x, y) {
+function is_potential_obstacle(ax, ay, x, y) {
     // console.log("ax:",ax,"ay:",ay,'x:',x,'y:',y, "me.x:",me.x,"me.y:",me.y)
     if (me.x >= x && me.y >= y) return ((x - 1 <= ax && ax <= me.x + 1) && (y - 1 <= ay && ay <= me.y + 1))
     if (me.x >= x && me.y <= y) return ((x - 1 <= ax && ax <= me.x + 1) && (me.y - 1 <= ay && ay <= y + 1))
